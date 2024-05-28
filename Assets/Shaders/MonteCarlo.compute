@@ -1,0 +1,102 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// 光線
+struct Ray
+{
+    float3 origin;
+    float3 direction;
+};
+
+// 三角形情報
+struct Triangle
+{
+    float3 v0;
+    float3 v1;
+    float3 v2;
+};
+
+// カメラ情報
+cbuffer CameraData
+{
+    float3 pos;
+    float3 forward;
+    float3 up;
+    float3 right;
+    float2 screenSize;
+    float fov;
+};
+
+// 全三角形情報
+StructuredBuffer<Triangle> triangles;
+
+// 計算結果テクスチャ
+RWTexture2D<float4> Result;
+
+// 三角形とレイの交差判定
+bool triangleIntersection(Triangle tri, Ray ray)
+{
+    float3 v0v1 = tri.v1 - tri.v0;
+    float3 v0v2 = tri.v2 - tri.v0;
+
+    float3 pvec = cross(ray.direction, v0v2);
+
+    float det = dot(v0v1, pvec);
+
+    // 行列式の計算結果が極小の場合、交差しないとみなす
+    if (abs(det) < 1e-8)
+    {
+        return false;
+    }
+
+    float invDet = 1.0f / det;
+
+    float3 tvec = ray.origin - tri.v0;
+    float u = dot(tvec, pvec) * invDet;
+    float3 qvec = cross(tvec, v0v1);
+    float v = dot(ray.direction, qvec) * invDet;
+
+    if (u < 0 || u > 1.0f || v < 0 || v > 1.0f || u + v > 1)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    uint width, height;
+    Result.GetDimensions(width, height);
+
+    // スレッドがテクスチャの範囲外の場合リターン
+    if (id.x >= width || id.y >= height)
+    {
+        return;
+    }
+
+    // スクリーン座標の算出
+    float2 uv = (float2(id.xy) / screenSize) * 2.0f - 1.0f;
+    uv.y *= -1.0f;
+
+    // レイの方向算出
+    uv *= tan(radians(fov * 0.5f));
+    float3 rayDir = normalize(forward + right * uv.x + up * uv.y);
+    rayDir = abs(rayDir);
+    Ray ray = { pos, rayDir };
+
+    //float3 color = 0;
+    //for (uint i = 0; i < triangles.Length; i++)
+    //{
+    //    Triangle tri = triangles[i];
+
+    //    if (triangleIntersection(tri, ray))
+    //    {
+    //        color = float3(1.0, 0, 0);
+    //    }
+    //}
+
+    // Result[id.xy] = float4(color, 1.0);
+    Result[id.xy] = float4(rayDir, 1.0);
+}
